@@ -1,0 +1,441 @@
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>사업부별 인원 관리 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #f1f5f9;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+        .input-active:focus {
+            background-color: #ffffff;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            outline: none;
+        }
+        ::placeholder {
+            color: #cbd5e1;
+            font-weight: 400;
+        }
+        .editable-header-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: transparent;
+            width: auto;
+        }
+        .editable-header-btn:hover {
+            background-color: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.2);
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div id="app" class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900">사업부 인원 관리 시스템</h1>
+                <p class="text-slate-500">사업부별 소속공장 및 협력업체 인원 현황을 통합 관리합니다.</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="addNewFactory()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl transition text-sm font-bold shadow-sm">
+                    + 사업부 추가
+                </button>
+                <button onclick="resetToDefault()" class="text-sm text-slate-400 hover:text-red-600 underline">데이터 초기화</button>
+            </div>
+        </header>
+
+        <!-- Stats Overview -->
+        <div id="stats-container" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"></div>
+
+        <!-- Main Content -->
+        <div id="factories-list" class="grid grid-cols-1 gap-8"></div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal-overlay" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <h2 id="modal-title" class="text-xl font-bold mb-6 text-slate-800">새 항목 추가</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">소속 유형</label>
+                    <select id="modal-input-type" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        <option value="direct">소속공장 (세부 관리)</option>
+                        <option value="partner">협력업체 (인원수 표기)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">이름 (공장명 또는 업체명)</label>
+                    <input type="text" id="modal-input-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="이름을 입력하세요">
+                </div>
+                <div id="modal-count-field">
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">초기 인원수</label>
+                    <input type="number" id="modal-input-count" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="0">
+                </div>
+                <input type="hidden" id="modal-target-factory-id">
+                <div class="flex justify-end gap-3 mt-8">
+                    <button onclick="closeModal()" class="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-xl transition">취소</button>
+                    <button onclick="handleModalSubmit()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition">등록하기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        const STORAGE_KEY = 'factoryData_v21_final';
+        const HEADER_STORAGE_KEY = 'customHeaders_v21';
+        const DEFAULT_FACTORIES = ["제1사업부", "제2사업부", "제3사업부", "제4사업부"];
+        
+        let customHeaders = JSON.parse(localStorage.getItem(HEADER_STORAGE_KEY)) || {
+            extra: "추가 인력(입력)",
+            others: "기타(직접입력)"
+        };
+
+        let factories = JSON.parse(localStorage.getItem(STORAGE_KEY)) || DEFAULT_FACTORIES.map((name, index) => ({
+            id: `f${Date.now() + index}`,
+            name: name,
+            units: [],
+            isEditing: false
+        }));
+
+        window.saveData = function(shouldRender = true) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(factories));
+            localStorage.setItem(HEADER_STORAGE_KEY, JSON.stringify(customHeaders));
+            if (shouldRender) render();
+            else updateGlobalStats();
+        };
+
+        window.changeHeaderName = function(event, key) {
+            if(event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const current = customHeaders[key];
+            const newValue = prompt(`[${current}]의 새로운 명칭을 입력하세요:`, current);
+            if (newValue !== null && newValue.trim() !== "") {
+                customHeaders[key] = newValue.trim();
+                window.saveData(true);
+            }
+        };
+
+        window.resetToDefault = function() {
+            if(confirm('모든 데이터와 헤더 설정이 초기화됩니다. 계속하시겠습니까?')) {
+                localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem(HEADER_STORAGE_KEY);
+                location.reload();
+            }
+        };
+
+        window.addNewFactory = function() {
+            const name = prompt('새 사업부 이름을 입력하세요', `제${factories.length + 1}사업부`);
+            if (name && name.trim()) {
+                factories.push({ id: `f${Date.now()}`, name: name.trim(), units: [], isEditing: false });
+                window.saveData();
+            }
+        };
+
+        window.removeFactory = function(id) {
+            if (confirm('사업부를 삭제하시겠습니까?')) {
+                factories = factories.filter(f => f.id !== id);
+                window.saveData();
+            }
+        };
+
+        window.toggleEditTitle = function(factoryId, state) {
+            const factory = factories.find(f => f.id === factoryId);
+            if (factory) {
+                factory.isEditing = state;
+                render();
+                if (state) {
+                    setTimeout(() => {
+                        const input = document.getElementById(`input-title-${factoryId}`);
+                        if (input) { input.focus(); input.select(); }
+                    }, 0);
+                }
+            }
+        };
+
+        window.updateFactoryName = function(factoryId, newName) {
+            const factory = factories.find(f => f.id === factoryId);
+            if (factory && newName.trim()) {
+                factory.name = newName.trim();
+                factory.isEditing = false;
+                window.saveData();
+            } else {
+                if(factory) factory.isEditing = false;
+                render();
+            }
+        };
+
+        window.openModal = function(factoryId) {
+            document.getElementById('modal-overlay').classList.remove('hidden');
+            document.getElementById('modal-input-name').value = '';
+            document.getElementById('modal-input-count').value = '';
+            document.getElementById('modal-target-factory-id').value = factoryId;
+            document.getElementById('modal-input-name').focus();
+        };
+
+        window.closeModal = function() {
+            document.getElementById('modal-overlay').classList.add('hidden');
+        };
+
+        window.handleModalSubmit = function() {
+            const name = document.getElementById('modal-input-name').value.trim();
+            const countValue = document.getElementById('modal-input-count').value;
+            const count = countValue === "" ? 0 : parseInt(countValue);
+            const type = document.getElementById('modal-input-type').value;
+            const factoryId = document.getElementById('modal-target-factory-id').value;
+
+            if (!name) return;
+
+            const factory = factories.find(f => f.id === factoryId);
+            if (factory) {
+                factory.units.push({
+                    id: 'u' + Date.now() + Math.random().toString(36).substr(2, 5),
+                    name: name,
+                    type: type,
+                    count: count,
+                    executives: 0,
+                    staff: 0,
+                    extra: "", 
+                    others: "" 
+                });
+            }
+            window.saveData();
+            window.closeModal();
+        };
+
+        window.handleInputChange = function(factoryId, unitId, field, value) {
+            const factory = factories.find(f => f.id === factoryId);
+            if (!factory) return;
+            const unit = factory.units.find(u => u.id === unitId);
+            
+            if (unit) {
+                const isNumericField = ['count', 'executives', 'staff'].includes(field);
+                if (isNumericField) {
+                    unit[field] = value === "" ? 0 : parseInt(value);
+                } else {
+                    unit[field] = value;
+                }
+                
+                if (field !== 'count') {
+                    const exe = parseInt(unit.executives) || 0;
+                    const sta = parseInt(unit.staff) || 0;
+                    const extVal = parseInt(unit.extra) || 0;
+                    const othVal = parseInt(unit.others) || 0;
+                    unit.count = exe + sta + (isNaN(extVal) ? 0 : extVal) + (isNaN(othVal) ? 0 : othVal);
+                    
+                    const totalInput = document.getElementById(`total-${unit.id}`);
+                    if (totalInput) totalInput.value = unit.count;
+                }
+                
+                updateFactoryTotalUI(factoryId);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(factories));
+            }
+        };
+
+        function updateFactoryTotalUI(factoryId) {
+            const factory = factories.find(f => f.id === factoryId);
+            if (!factory) return;
+            const total = factory.units.reduce((s, u) => s + (parseInt(u.count) || 0), 0);
+            const display = document.getElementById(`factory-total-${factoryId}`);
+            if (display) display.innerText = total.toLocaleString();
+            updateGlobalStats();
+        }
+
+        function updateGlobalStats() {
+            let totalDirect = 0;
+            let totalPartner = 0;
+            factories.forEach(f => {
+                f.units.forEach(u => {
+                    const c = parseInt(u.count) || 0;
+                    if(u.type === 'direct') totalDirect += c;
+                    else totalPartner += c;
+                });
+            });
+            
+            const statsContainer = document.getElementById('stats-container');
+            if (statsContainer) {
+                statsContainer.innerHTML = `
+                    <div class="glass-card p-5 rounded-2xl shadow-sm border-b-4 border-b-slate-400"><p class="text-xs text-slate-500 font-bold uppercase mb-1 tracking-tight">전체 인력 현황</p><p class="text-2xl font-black text-slate-900">${(totalDirect + totalPartner).toLocaleString()}<span class="text-sm font-normal ml-1">명</span></p></div>
+                    <div class="glass-card p-5 rounded-2xl shadow-sm border-b-4 border-b-blue-500"><p class="text-xs text-blue-600 font-bold uppercase mb-1 tracking-tight">본사/소속공장</p><p class="text-2xl font-black text-slate-900">${totalDirect.toLocaleString()}<span class="text-sm font-normal ml-1 text-slate-400">명</span></p></div>
+                    <div class="glass-card p-5 rounded-2xl shadow-sm border-b-4 border-b-emerald-500"><p class="text-xs text-emerald-600 font-bold uppercase mb-1 tracking-tight">외부협력사</p><p class="text-2xl font-black text-slate-900">${totalPartner.toLocaleString()}<span class="text-sm font-normal ml-1 text-slate-400">명</span></p></div>
+                    <div class="glass-card p-5 rounded-2xl shadow-sm border-b-4 border-b-orange-400"><p class="text-xs text-orange-600 font-bold uppercase mb-1 tracking-tight">관리 거점</p><p class="text-2xl font-black text-slate-900">${factories.length}<span class="text-sm font-normal ml-1">개소</span></p></div>
+                `;
+            }
+        }
+
+        window.deleteUnit = function(factoryId, unitId) {
+            if(confirm('해당 항목을 정말로 삭제하시겠습니까?')) {
+                const factory = factories.find(f => f.id === factoryId);
+                if(factory) {
+                    factory.units = factory.units.filter(u => u.id !== unitId);
+                    window.saveData();
+                }
+            }
+        };
+
+        function render() {
+            updateGlobalStats();
+            const listContainer = document.getElementById('factories-list');
+
+            listContainer.innerHTML = factories.map(factory => {
+                const directs = factory.units.filter(u => u.type === 'direct');
+                const partners = factory.units.filter(u => u.type === 'partner');
+                const fTotal = factory.units.reduce((s, u) => s + (parseInt(u.count) || 0), 0);
+
+                return `
+                    <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden mb-6">
+                        <div class="bg-gradient-to-r from-slate-900 to-slate-800 p-6 flex justify-between items-center text-white">
+                            <div class="flex-1">
+                                ${factory.isEditing ? `
+                                    <input id="input-title-${factory.id}" type="text" value="${factory.name}" onblur="updateFactoryName('${factory.id}', this.value)" class="bg-slate-700 text-white text-2xl font-bold px-3 py-1 rounded-xl border-2 border-blue-400 w-full max-w-md outline-none">
+                                ` : `
+                                    <div class="flex items-center gap-3 group">
+                                        <h3 class="text-2xl font-bold cursor-pointer hover:text-blue-300 transition" onclick="toggleEditTitle('${factory.id}', true)">${factory.name}</h3>
+                                        <button onclick="removeFactory('${factory.id}')" class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 transition">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="pointer-events: none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        </button>
+                                    </div>
+                                `}
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] opacity-50 font-bold tracking-widest uppercase mb-1">사업부 총원</p>
+                                <p class="text-3xl font-black text-blue-400" id="factory-total-${factory.id}">${fTotal.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        
+                        <div class="p-6 space-y-10">
+                            <section>
+                                <div class="flex justify-between items-center mb-5">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-6 bg-blue-600 rounded-full"></div>
+                                        <h4 class="font-bold text-slate-800 text-lg">소속공장 현황</h4>
+                                    </div>
+                                    <button onclick="openModal('${factory.id}')" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition tracking-tight">+ 공장 등록</button>
+                                </div>
+                                <div class="overflow-x-auto rounded-2xl border border-slate-100">
+                                    <table class="w-full text-sm text-left border-collapse">
+                                        <thead>
+                                            <tr class="bg-slate-50 border-b text-slate-500 text-[11px] font-black tracking-wider text-center">
+                                                <th class="p-4 w-1/5 text-left">공장명</th>
+                                                <th class="p-4 bg-blue-50/50 text-blue-700">총 합계</th>
+                                                <th class="p-4">임원</th>
+                                                <th class="p-4">직원</th>
+                                                <th class="p-4 text-indigo-600">
+                                                    <button type="button" class="editable-header-btn" onclick="window.changeHeaderName(event, 'extra')">
+                                                        <span>${customHeaders.extra}</span>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="pointer-events: none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    </button>
+                                                </th>
+                                                <th class="p-4 text-slate-500">
+                                                    <button type="button" class="editable-header-btn" onclick="window.changeHeaderName(event, 'others')">
+                                                        <span>${customHeaders.others}</span>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="pointer-events: none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    </button>
+                                                </th>
+                                                <th class="p-4 w-10"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y">
+                                            ${directs.length === 0 ? '<tr><td colspan="7" class="p-12 text-center text-slate-300">데이터를 추가해 주세요.</td></tr>' : directs.map(u => `
+                                                <tr class="hover:bg-slate-50/50 transition">
+                                                    <td class="p-4 font-bold text-slate-700">${u.name}</td>
+                                                    <td class="p-2 bg-blue-50/20">
+                                                        <input type="number" id="total-${u.id}" value="${u.count || 0}"
+                                                            oninput="handleInputChange('${factory.id}', '${u.id}', 'count', this.value)"
+                                                            class="w-full text-center p-2.5 rounded-xl bg-white border-2 border-blue-100 font-black text-blue-700 text-base outline-none input-active">
+                                                    </td>
+                                                    <td class="p-2">
+                                                        <input type="number" value="${u.executives ?? 0}" 
+                                                            oninput="handleInputChange('${factory.id}', '${u.id}', 'executives', this.value)"
+                                                            class="w-full text-center p-2.5 rounded-xl border border-slate-200 focus:border-blue-400 outline-none font-semibold text-slate-700 input-active">
+                                                    </td>
+                                                    <td class="p-2">
+                                                        <input type="number" value="${u.staff ?? 0}" 
+                                                            oninput="handleInputChange('${factory.id}', '${u.id}', 'staff', this.value)"
+                                                            class="w-full text-center p-2.5 rounded-xl border border-slate-200 focus:border-blue-400 outline-none font-semibold text-slate-700 input-active">
+                                                    </td>
+                                                    <td class="p-2">
+                                                        <input type="text" value="${u.extra || ''}" 
+                                                            oninput="handleInputChange('${factory.id}', '${u.id}', 'extra', this.value)"
+                                                            placeholder="메모/숫자"
+                                                            class="w-full text-center p-2.5 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/10 focus:border-indigo-500 focus:border-solid outline-none font-bold text-indigo-700 input-active">
+                                                    </td>
+                                                    <td class="p-2">
+                                                        <input type="text" value="${u.others || ''}" 
+                                                            oninput="handleInputChange('${factory.id}', '${u.id}', 'others', this.value)"
+                                                            placeholder="메모/숫자"
+                                                            class="w-full text-center p-2.5 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/30 focus:border-slate-400 focus:border-solid outline-none font-bold text-slate-600 input-active">
+                                                    </td>
+                                                    <td class="p-4 text-center">
+                                                        <button onclick="window.deleteUnit('${factory.id}', '${u.id}')" class="text-slate-300 hover:text-red-500 transition p-2 bg-slate-50 rounded-lg hover:bg-red-50">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="pointer-events: none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <section>
+                                <div class="flex justify-between items-center mb-5">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-6 bg-emerald-500 rounded-full"></div>
+                                        <h4 class="font-bold text-slate-800 text-lg">외부 협력사</h4>
+                                    </div>
+                                    <button onclick="openModal('${factory.id}')" class="text-xs bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-emerald-700 shadow-md shadow-emerald-100 transition tracking-tight">+ 협력사 등록</button>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    ${partners.length === 0 ? '<p class="text-slate-400 text-sm italic py-2">등록된 협력사가 없습니다.</p>' : partners.map(u => `
+                                        <div class="flex flex-col p-4 bg-emerald-50/30 rounded-2xl border border-emerald-100 group hover:bg-emerald-50 hover:shadow-sm transition text-right relative">
+                                            <div class="flex justify-between items-start mb-3">
+                                                <span class="text-slate-800 font-bold truncate pr-8 text-left w-full">${u.name}</span>
+                                                <button onclick="window.deleteUnit('${factory.id}', '${u.id}')" class="absolute top-4 right-4 z-10 p-1 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition bg-white/80 rounded-md">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="pointer-events: none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </div>
+                                            <div class="flex items-baseline justify-end gap-1 mt-auto">
+                                                <input type="number" value="${u.count}" 
+                                                    oninput="handleInputChange('${factory.id}', '${u.id}', 'count', this.value)"
+                                                    class="bg-transparent border-b border-emerald-200 w-20 text-right text-emerald-700 text-xl font-black outline-none focus:border-emerald-500">
+                                                <span class="text-[10px] text-emerald-400 font-bold">명</span>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        render();
+    </script>
+</body>
+</html>
